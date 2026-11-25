@@ -1,0 +1,132 @@
+import Link from "next/link"
+import { buttonVariants } from "@/components/ui/button"
+import { Live } from "@/components/live"
+import { SamplePreview } from "@/components/dashboard/sample-preview"
+import { prisma } from "@/server/db"
+import { requireWorkspace } from "@/server/session"
+import { cn } from "cn"
+
+export const metadata = { title: "Overview" }
+
+export default function DashboardPage() {
+  return (
+    <Live>
+      <DashboardContent />
+    </Live>
+  )
+}
+
+async function DashboardContent() {
+  const context = await requireWorkspace()
+  const workspaceId = context.workspace.id
+  const [accounts, scheduled, published, failed, analyticsCount, upcoming, activity] = await Promise.all([
+    prisma.socialAccount.count({ where: { workspaceId } }),
+    prisma.post.count({ where: { workspaceId, status: "SCHEDULED" } }),
+    prisma.post.count({ where: { workspaceId, status: "PUBLISHED" } }),
+    prisma.post.count({ where: { workspaceId, status: "FAILED" } }),
+    prisma.analytics.count({ where: { workspaceId } }),
+    prisma.post.findMany({
+      where: { workspaceId, status: "SCHEDULED" },
+      orderBy: { scheduledFor: "asc" },
+      take: 5,
+    }),
+    prisma.auditLog.findMany({
+      where: { workspaceId },
+      orderBy: { createdAt: "desc" },
+      take: 6,
+    }),
+  ])
+
+  const stats = [
+    ["Connected accounts", String(accounts)],
+    ["Scheduled posts", String(scheduled)],
+    ["Published posts", String(published)],
+    ["Failed posts", String(failed)],
+    ["Stored metric rows", analyticsCount === 0 ? "None yet" : String(analyticsCount)],
+    ["Follower growth", "Not available"],
+  ]
+
+  return (
+    <div className="mx-auto grid max-w-6xl gap-6">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-semibold tracking-tight">Overview</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Counts below come from this workspace. Engagement is omitted until a platform sends metrics.
+          </p>
+        </div>
+        <p className="text-sm text-muted-foreground">{context.planName} plan</p>
+      </div>
+
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {stats.map(([label, value]) => (
+          <article key={label} className="rounded-2xl border bg-card p-4">
+            <p className="text-sm text-muted-foreground">{label}</p>
+            <p className="mt-2 text-2xl font-semibold tracking-tight">{value}</p>
+          </article>
+        ))}
+      </section>
+
+      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        {[
+          ["/posts", "Create post"],
+          ["/content-studio", "Generate AI caption"],
+          ["/content-studio", "Generate AI image"],
+          ["/calendar", "Schedule post"],
+          ["/social-accounts", "Connect social account"],
+        ].map(([href, label]) => (
+          <Link key={label} href={href} className={cn(buttonVariants({ variant: "outline" }), "h-10 justify-center")}>
+            {label}
+          </Link>
+        ))}
+      </section>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <section className="rounded-2xl border bg-card p-5">
+          <h2 className="font-semibold">Upcoming scheduled content</h2>
+          {upcoming.length === 0 ? (
+            <p className="mt-3 text-sm text-muted-foreground">No posts are scheduled. Scheduling is not connected yet.</p>
+          ) : (
+            <ul className="mt-3 grid gap-2 text-sm">
+              {upcoming.map((post) => (
+                <li key={post.id}>{post.title || "Untitled"} · {post.scheduledFor?.toISOString()}</li>
+              ))}
+            </ul>
+          )}
+        </section>
+        <section className="rounded-2xl border bg-card p-5">
+          <h2 className="font-semibold">Recent workspace activity</h2>
+          {activity.length === 0 ? (
+            <p className="mt-3 text-sm text-muted-foreground">No activity has been recorded.</p>
+          ) : (
+            <ul className="mt-3 grid gap-2 text-sm">
+              {activity.map((item) => (
+                <li key={item.id} className="flex justify-between gap-3">
+                  <span>{item.action.replaceAll(".", " ")}</span>
+                  <span className="text-muted-foreground">{item.createdAt.toLocaleString("en-IN", { timeZone: context.workspace.timezone })}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="mt-4 text-sm text-muted-foreground">No publishing attempts have been recorded.</p>
+        </section>
+      </div>
+
+      <section className="rounded-2xl border bg-card p-5">
+        <h2 className="font-semibold">AI content suggestions</h2>
+        {context.workspace.profile?.strategyOutline ? (
+          <div className="mt-3">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              {context.workspace.profile.strategySource === "OPENAI" ? "Generated by OpenAI" : "Starter outline, not an AI generation"}
+            </p>
+            <pre className="mt-3 whitespace-pre-wrap font-sans text-sm leading-6">{context.workspace.profile.strategyOutline}</pre>
+          </div>
+        ) : (
+          <p className="mt-3 text-sm text-muted-foreground">No strategy has been saved for this workspace.</p>
+        )}
+      </section>
+
+      <SamplePreview />
+    </div>
+  )
+}
